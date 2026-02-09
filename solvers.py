@@ -39,14 +39,19 @@ class PathRepresentation(Problem):
         return self._euc[a, b]
 
     def sp_dist(self, a, b):
+        if a == b:
+            return 0.0
         if self._use_direct:
             return self._euc[a, b]
         return self._sp[a][0][b]
 
     def sp_path(self, a, b):
+        if a == b:
+            return [a]
         if self._use_direct:
             return [a, b]
         return self._sp[a][1][b]
+
 
     def cached_baseline(self):
         if self._baseline_cost is None:
@@ -58,14 +63,18 @@ class PathRepresentation(Problem):
         c, w = 0, 0.0
         cost = 0.0
         for city, g in trip:
-            for a, b in zip(self.sp_path(c, city), self.sp_path(c, city)[1:]):
-                cost += self.cost([a, b], w)
+            if c != city:
+                path = self.sp_path(c, city)
+                for a, b in zip(path, path[1:]):
+                    cost += self.cost([a, b], w)
             w += g
             c = city
-        for a, b in zip(self.sp_path(c, 0), self.sp_path(c, 0)[1:]):
-            cost += self.cost([a, b], w)
+        if c != 0:
+            path = self.sp_path(c, 0)
+            for a, b in zip(path, path[1:]):
+                cost += self.cost([a, b], w)
         return cost
-
+    
     def eval_solution(self, sol):
         return sum(self.eval_trip(t) for t in sol)
     
@@ -117,6 +126,7 @@ class MutationOperators:
 
     @staticmethod
     def swap(sol: Individual, rep: PathRepresentation) -> Individual:
+        """Swap 2 cases, swap cities in a trip, swap cities between trips and merging them if needed."""
         trips = [list(t) for t in sol.genotype]
         flat = [(i, j) for i, t in enumerate(trips) for j in range(len(t))]
         if len(flat) < 2:
@@ -184,7 +194,7 @@ class MutationOperators:
                 merged.append((city, gold))
                 merged_cities.add(city)
 
-        merged = rep.optimize_trip_order(merged)
+        merged = rep.optimize_trip_order(merged) # This function before was used for initialization too !
         trips = [t for k, t in enumerate(trips) if k not in (i, j)]
         trips.append(merged)
         return Individual(trips, rep.eval_solution(trips))
@@ -489,8 +499,7 @@ class EvolutionaryAlgorithm:
                    problem_rep : PathRepresentation,
                    population_size=100,
                    offspring_size=50,
-                   selection_method : callable = None,
-                   with_init_optmization : bool = False
+                   selection_method : callable = None
                    ):
 
         self.representation = problem_rep
@@ -498,21 +507,18 @@ class EvolutionaryAlgorithm:
         self.population_size = population_size
         self.offspring_size = offspring_size
         self.selection_method = selection_method
-        self.with_init_optmization = with_init_optmization
 
         # Initialize the current population
         self.current_population = self.initialize_population()
 
-
-    def init_high_beta(self):
-        """beta>1: individual round-trips, find best k per city."""
+    def initialize_genome(self):
         sol = []
         for c in self.representation.cities:
             g, d = self.representation.golds[c], self.representation.euc_dist(0, c)
             best_k, best_cost = 1, float('inf')
             for k in range(1, 50):
                 gk = g / k
-                per = d + d + (self.representation.alpha * d * gk) ** self.representation.beta
+                per = 2 * d + (self.representation.alpha * d * gk) ** self.representation.beta
                 total = k * per
                 if total < best_cost:
                     best_k, best_cost = k, total
@@ -523,34 +529,10 @@ class EvolutionaryAlgorithm:
                 sol.append([(c, gk)])
         return sol
 
-    def init_low_beta(self):
-        """beta=1: nearest-neighbor multi-city tours."""
-        sol, unvisited = [], set(self.representation.cities)
-        while unvisited:
-            trip, cur, w = [], 0, 0.0
-            cap = random.uniform(0.3, 1.0) * sum(self.representation.golds[c] for c in unvisited) # random capacity (between 30%-100%) * golds of remaining cities
-            while unvisited and w < cap:
-                nxt = min(unvisited, key=lambda c: self.representation.euc_dist(cur, c))
-                trip.append((nxt, self.representation.golds[nxt]))
-                w += self.representation.golds[nxt]
-                unvisited.discard(nxt)
-                cur = nxt
-            if trip:
-                if self.with_init_optmization:
-                    sol.append(self.representation.optimize_trip_order(trip))
-                else:
-                    sol.append(trip) # initialize faster without optimizing trip order leaving the optimization to the evolutionary process ! 
-        return sol
-
-    def init_random(self):
-        if self.representation.beta > 1:
-            return self.init_high_beta()
-        return self.init_low_beta()
-
     def initialize_population(self) -> list[Individual]:
         population = []
         for i in tqdm(range(self.population_size), desc="Initializing population"):
-            genotype = self.init_random()
+            genotype = self.initialize_genome()
             fitness = self.representation.eval_solution(genotype)
             population.append(Individual(genotype, fitness))
         population.sort(key=lambda ind: ind.fitness)
@@ -565,75 +547,75 @@ class EvolutionaryAlgorithm:
 
     def solve(self, num_generations=100, mutation_rate=0.3):
         history = []
-        stagnation_counter = 0
-    
+
         if self.representation.beta > 1:
-            # β>1: trip splitting dominates
             mut_ops = [
-                (MutationOperators.change_k, 0.4),      # primary: adjust splits
-                (MutationOperators.split_trip, 0.2),     # break trips apart
-                (MutationOperators.swap, 0.2),           # shuffle stops
-                (AStarGuidedOperators.insertion_mutate, 0.2),  # smart relocation
+                (MutationOperators.change_k, 0.5),
+                (MutationOperators.split_trip, 0.2),
+                (MutationOperators.swap, 0.3),
             ]
         else:
-            # β=1: route structure dominates
             mut_ops = [
-                (AStarGuidedOperators.insertion_mutate, 0.25),  # smart city relocation
-                (AStarGuidedOperators.swap_guided, 0.25),       # smart inter-trip swap
-                (AStarGuidedOperators.or_opt_guided, 0.2),      # smart segment move
-                (MutationOperators.merge_trips, 0.15),     # combine trips
-                (MutationOperators.move_city, 0.15),       # random relocation
+                (MutationOperators.merge_trips, 0.4),
+                (MutationOperators.move_city, 0.4),
+                (MutationOperators.swap, 0.2)
             ]
-    
+
         ops, weights = zip(*mut_ops)
-    
+
         for generation in tqdm(range(num_generations), desc="Evolving"):
             offspring = []
-    
+
             for _ in range(self.offspring_size):
                 parent1 = self.selection_method(self.current_population)
-    
-                # phase 1: normal evolution
-                if stagnation_counter < 20:
-                    if random.random() > mutation_rate:
-                        parent2 = self.selection_method(self.current_population)
+
+                if random.random() > mutation_rate:
+                    parent2 = self.selection_method(self.current_population)
+                    
+                    if self.representation.beta > 1:
                         child = CrossoverOperators.trip_crossover(
                             parent1.genotype, parent2.genotype, self.representation)
                     else:
-                        mut_fn = random.choices(ops, weights=weights, k=1)[0]
-                        child = mut_fn(parent1, self.representation)
-    
-                # phase 2: stagnating → targeted disruption
+                        child = CrossoverOperators.targeted_crossover(parent1, parent2, self.representation)
                 else:
-                    r = random.random()
-                    if r < 0.4:
-                        # targeted crossover to break converged structure
-                        parent2 = self.selection_method(self.current_population)
-                        child = CrossoverOperators.targeted_crossover(
-                            parent1, parent2, self.representation)
-                    elif r < 0.7:
-                        # double mutation for bigger jumps
-                        mut_fn = random.choices(ops, weights=weights, k=1)[0]
-                        child = mut_fn(parent1, self.representation)
-                        mut_fn = random.choices(ops, weights=weights, k=1)[0]
-                        child = mut_fn(child, self.representation)
-                    else:
-                        # inject fresh random individual
-                        genotype = self.init_random()
-                        child = Individual(genotype, self.representation.eval_solution(genotype))
-    
+                    mut_fn = random.choices(ops, weights=weights, k=1)[0]
+                    child = mut_fn(parent1, self.representation)
+
                 offspring.append(child)
-    
+
             self.current_population = self.evaluate_population(offspring)
             history.append(self.current_population[0].fitness)
-    
-            # track stagnation
-            if len(history) > 10 and abs(history[-1] - history[-10]) < 0.001 * abs(history[-10]):
-                stagnation_counter += 1
-            else:
-                stagnation_counter = 0
-    
+
         return self.current_population, history
+
+
+    def validate_solution(self, sol):
+        """Check that total gold in solution matches total gold in graph."""
+        sol_gold = defaultdict(float)
+        for trip in sol:
+            for city, gold in trip:
+                sol_gold[city] += gold
+    
+        valid = True
+        for city in self.representation.cities:
+            expected = self.representation.golds[city]
+            actual = sol_gold.get(city, 0)
+            if abs(expected - actual) > 0.01:
+                print(f"City {city}: expected {expected:.2f}, got {actual:.2f}")
+                valid = False
+    
+        # check no extra cities
+        for city in sol_gold:
+            if city not in self.representation.cities:
+                print(f"City {city}: not in graph but found in solution")
+                valid = False
+    
+        total_expected = sum(self.representation.golds.values())
+        total_actual = sum(sol_gold.values())
+        print(f"Total gold — expected: {total_expected:.2f}, actual: {total_actual:.2f}, "
+              f"match: {abs(total_expected - total_actual) < 0.01}")
+    
+        return valid
 
     def plot(self, history):
         import matplotlib.pyplot as plt
