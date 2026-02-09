@@ -11,7 +11,7 @@ project-work/
 │   └── solvers.py                      # Full implementation (EA, mutations, crossover, representation)
 ├── mysolution.ipynb                    # Experiments and results for all configurations
 ├── Sina_Behnam_Sharbafan.pdf           # Report
-├── base_requirements.txt               # Required libraries
+├── requirements.txt               # Required libraries
 └── README.md
 ```
 
@@ -30,5 +30,5 @@ python s322796.py --num_cities 100 --alpha 1 --beta 2 --density 1.0 --num_genera
 ## Requirements
 
 ```bash
-pip install -r base_requirements.txt
+pip install -r requirements.txt
 ```
