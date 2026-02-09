@@ -32,4 +32,3 @@ python s322796.py --num_cities 100 --alpha 1 --beta 2 --density 1.0 --num_genera
 ```bash
 pip install -r base_requirements.txt
 ```
-```
