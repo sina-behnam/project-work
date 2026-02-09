@@ -1,9 +1,9 @@
-```markdown
+
 # Project Work — Weighted Traveling Collector Problem (WTCP)
 
 ## Structure
 
-
+```
 project-work/
 ├── Problem.py                          # Problem class (provided)
 ├── s322796.py                          # Main solution entry point
@@ -13,7 +13,7 @@ project-work/
 ├── Sina_Behnam_Sharbafan.pdf           # Report
 ├── base_requirements.txt               # Required libraries
 └── README.md
-
+```
 
 ## Solution
 
