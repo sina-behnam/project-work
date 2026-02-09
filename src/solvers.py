@@ -4,36 +4,34 @@ from collections import namedtuple
 from tqdm import tqdm
 from collections import deque, defaultdict
 from itertools import permutations
-from problem import Problem
+from Problem import Problem
 import networkx as nx
 
 Individual = namedtuple('Individual', ['genotype', 'fitness'])
 
+class PathRepresentation:
 
-class PathRepresentation(Problem):
+    def __init__(self, problem: Problem):
+        self.problem = problem
+        self._G = problem.graph  # store one copy
+        self.alpha = problem.alpha
+        self.beta = problem.beta
+        self.cities = [n for n in self._G.nodes if n != 0]
+        self.golds = {n: self._G.nodes[n]['gold'] for n in self.cities}
+        self._pos = nx.get_node_attributes(self._G, 'pos')
+        self._n = len(self._G.nodes)
+        self._sp_cache = {}
+        self._baseline_cost = None
 
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-        G = self.graph
-        self.cities = [n for n in G.nodes if n != 0]
-        self.golds = {n: G.nodes[n]['gold'] for n in self.cities}
-        self._pos = nx.get_node_attributes(G, 'pos')
-        self._n = len(G.nodes)
-        self._density = kwargs.get('density', 0.5)
-
-        # Euclidean distance matrix — always cheap, used for decisions
+        # Euclidean matrix
         coords = np.array([self._pos[i] for i in range(self._n)])
         diff = coords[:, np.newaxis, :] - coords[np.newaxis, :, :]
         self._euc = np.sqrt(np.sum(diff**2, axis=-1))
 
-        if self._density == 1.0:
-            # direct edge = shortest path, no graph search needed ever
-            self._exact_dist = self._euc
-            self._use_direct = True
-        else:
-            # sparse: precompute exact graph distances
-            self._sp = dict(nx.all_pairs_dijkstra(G, weight='dist'))
-            self._use_direct = False
+        # check density ( it could have been provided by the problem but we can re-compute it here too )
+        actual_edges = len(self._G.edges)
+        possible_edges = self._n * (self._n - 1) / 2
+        self._use_direct = (actual_edges / possible_edges) > 0.99 if possible_edges > 0 else False
 
     def euc_dist(self, a, b):
         return self._euc[a, b]
@@ -43,23 +41,36 @@ class PathRepresentation(Problem):
             return 0.0
         if self._use_direct:
             return self._euc[a, b]
-        return self._sp[a][0][b]
+        if (a, b) not in self._sp_cache:
+            self._compute_and_cache(a, b)
+        return self._sp_cache[(a, b)][0]
 
     def sp_path(self, a, b):
         if a == b:
             return [a]
         if self._use_direct:
             return [a, b]
-        return self._sp[a][1][b]
+        if (a, b) not in self._sp_cache:
+            self._compute_and_cache(a, b)
+        return self._sp_cache[(a, b)][1]
 
+    def _compute_and_cache(self, a, b):
+        path = nx.astar_path(self._G, a, b,
+                             heuristic=lambda u, v: self._euc[u, v],
+                             weight='dist')
+        dist = nx.path_weight(self._G, path, weight='dist')
+        self._sp_cache[(a, b)] = (dist, path)
+        self._sp_cache[(b, a)] = (dist, list(reversed(path)))
+
+    def cost(self, path, weight):
+        return self.problem.cost(path, weight)
 
     def cached_baseline(self):
         if self._baseline_cost is None:
-            self._baseline_cost = self.baseline()
+            self._baseline_cost = self.problem.baseline()
         return self._baseline_cost
 
     def eval_trip(self, trip):
-        """trip = [(city, gold_amount), ...] then cost including return"""
         c, w = 0, 0.0
         cost = 0.0
         for city, g in trip:
@@ -74,7 +85,7 @@ class PathRepresentation(Problem):
             for a, b in zip(path, path[1:]):
                 cost += self.cost([a, b], w)
         return cost
-    
+
     def eval_solution(self, sol):
         return sum(self.eval_trip(t) for t in sol)
     
