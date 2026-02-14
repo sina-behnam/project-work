@@ -2,9 +2,36 @@ import argparse
 from src.solvers import EvolutionaryAlgorithm, PathRepresentation, SelectionMethods
 from functools import partial
 from Problem import Problem
+import networkx as nx
 
 POPULATION_SIZE = 50
 OFFSPRING_SIZE = 30
+
+def conversion(best, rep):
+    """Convert EA solution (list of trips) to the required flat path format."""
+    path = []
+    for trip in best.genotype:
+        current = 0
+        for city, gold in trip:
+            sp = rep.sp_path(current, city)
+            # add intermediate cities with gold=0
+            for node in sp[1:-1]:
+                path.append((node, 0))
+            path.append((city, gold))
+            current = city
+        # return to depot
+        sp = rep.sp_path(current, 0)
+        for node in sp[1:-1]:
+            path.append((node, 0))
+        path.append((0, 0))
+    return path
+
+def is_valid(path, p:Problem):
+    # Professor Validation Function 
+    for (c1, gold1), (c2, gold2) in zip(path, path[1:]):
+        if not nx.has_path(p.graph, c1, c2):
+            return False
+    return True 
 
 def arg_problem():
     parser = argparse.ArgumentParser(description='Solve the WTCP problem using an evolutionary algorithm.')
@@ -39,7 +66,10 @@ def solution():
     print("baseline", problem.baseline())
     # algorithm.plot(history)
 
-    return last_pop[0].genotype + [(0,0)] # to match the expected output format
+    flatten_path = conversion(last_pop[0], problem_rep)
+    print("Is valid path?", is_valid(flatten_path, problem))
+
+    return flatten_path
 
 
 if __name__ == "__main__":
