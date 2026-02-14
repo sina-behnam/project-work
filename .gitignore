@@ -2,3 +2,5 @@
 /__pycache__
 *.pyc
 /temps
+/.vscode
+/.ipynb_checkpoints
