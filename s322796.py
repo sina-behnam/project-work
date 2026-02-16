@@ -69,11 +69,9 @@ def arg_problem():
     parser.add_argument('--mutation_rate', type=float, default=0.3, help='Mutation rate for the evolutionary algorithm')
     return parser.parse_args()
 
-def solution():
+def main(num_cities=100, alpha=1.0, beta=2.0, density=1.0, seed=42, num_generations=50, mutation_rate=0.3):
 
-    args = arg_problem()
-
-    problem = Problem(args.num_cities, density=args.density, alpha=args.alpha, beta=args.beta, seed=args.seed)
+    problem = Problem(num_cities, density=density, alpha=alpha, beta=beta, seed=seed)
 
     problem_rep = PathRepresentation(problem)
 
@@ -84,7 +82,7 @@ def solution():
         selection_method=partial(SelectionMethods.tournament_selection, tournament_size=10)
     )
 
-    last_pop, history = algorithm.solve(num_generations=args.num_generations, mutation_rate=args.mutation_rate)
+    last_pop, history = algorithm.solve(num_generations=num_generations, mutation_rate=mutation_rate)
 
     # algorithm.plot(history)
 
@@ -101,4 +99,6 @@ def solution():
 
 
 if __name__ == "__main__":
-    solution()
+    args = arg_problem()
+
+    main(**vars(args))
